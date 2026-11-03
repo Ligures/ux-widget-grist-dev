@@ -39,7 +39,6 @@ En haut de la page, de gauche à droite et de haut en bas :
   | Imprimer | Imprime la page ou l'enregistre en PDF |
   | Aide | Ouvre ce guide ; l'onglet Nouveautés présente les évolutions du widget |
   | Plein écran | Réservé aux administrateurs |
-  | Disposition | Réservé aux administrateurs |
 
   Une pastille rouge sur ☰ signale une nouvelle version du widget : elle disparaît après lecture de l'onglet Nouveautés.
 - **Listes de sélection** (par exemple Département, Circonscription, École) : choisir une valeur filtre les blocs de la page.
@@ -91,6 +90,7 @@ Chaque vue s'affiche dans un **bloc**, avec un titre et quelques commandes :
 - **Supprimer une ligne**, si le bloc le propose : cliquer sur la ligne, puis sur **− Supprimer la ligne**. Le bouton demande confirmation (« Confirmer la suppression ? », ligne surlignée en rouge) : cliquer une seconde fois dans les 4 secondes. La suppression se fait aussi dans Grist ; elle peut être annulée dans Grist (Annuler).
   - Les valeurs calculées (formules) ne sont pas modifiables.
   - Une modification refusée par les droits est signalée.
+- **Bloc-notes** (texte sur fond jaune pâle), si vos droits le permettent : bouton ✎ en haut à droite ou double-clic sur le texte, saisie (`# titre`, `**gras**`, `- liste`…), puis **Enregistrer** (Ctrl+Entrée) ou **Annuler** (Échap).
 
 ### Cartes
 
