@@ -1,2 +1,337 @@
-# ux-widget-grist-dev
-Vue html sur page mutli-vues grist, version en développement
+# UX widget grist
+
+<img src="aia.png" alt="AIA" width="40" align="left" /> **AIA — Assisté par l'intelligence artificielle.** Ce widget et sa documentation ont été réalisés avec l'assistance d'une IA, sous la direction et avec la validation de leur auteur. Icône : [Martine Peters](https://mpeters.uqo.ca/utilisation-transparente-de-lintelligence-artificielle/), CC BY-NC-SA 4.0.
+<br clear="left" />
+
+Widget personnalisé [Grist](https://www.getgrist.com/) qui rassemble sur **une seule page, condensée et lisible**, plusieurs vues natives d'un document : tableaux, fiches, listes de fiches, graphiques natifs et avancés, cartes et listes déroulantes.
+
+Le widget ne duplique rien. Il **relit la configuration des vues Grist** (tables de métadonnées `_grist_*`) et en reproduit le rendu. Cela comprend les colonnes affichées, le tri, les filtres, les liaisons entre vues, la mise en forme conditionnelle et la disposition des fiches. Quand une vue change dans Grist, la page suit.
+
+**Version actuelle : 0.9.4.27** (en développement) · Développeur : **Ligures** — voir le [journal des modifications](CHANGELOG.md).
+Pour l'usage au quotidien, voir le [guide d'utilisation](GUIDE-UTILISATEUR.md), aussi accessible dans le widget par le bouton **Aide**.
+
+---
+
+## Sommaire
+
+- [Fonctionnalités](#fonctionnalités)
+- [Contenu du dépôt](#contenu-du-dépôt)
+- [Installation](#installation)
+- [Préparer le document Grist](#préparer-le-document-grist)
+- [Cartes et zonages](#cartes-et-zonages)
+- [Sécurité et confidentialité](#sécurité-et-confidentialité)
+- [Dépendances](#dépendances)
+- [Structure du code](#structure-du-code)
+- [Limites connues](#limites-connues)
+- [Licence et sources des données](#licence-et-sources-des-données)
+
+---
+
+## Fonctionnalités
+
+**Vues prises en charge**
+
+| Vue Grist | Rendu dans la page |
+|---|---|
+| Tableau | Tableau à largeurs ajustées, en-têtes fixes, tri et filtres par colonne, recherche, colonnes figées |
+| Fiche | Fiche avec la disposition de la vue Grist, navigation précédent / suivant, ou toutes les fiches en liste |
+| Fiches | Liste de fiches, largeur réglable |
+| Graphique | Graphiques natifs (barres, lignes, secteurs, aires…) avec Chart.js |
+| Graphique avancé | Widget Plotly de Grist, sources de données comprises |
+| Carte | Widget carte de Grist avec Leaflet, voir [Cartes et zonages](#cartes-et-zonages) |
+| Markdown | Texte mis en forme de la ligne sélectionnée, taille du texte réglable ; en option, bloc-notes modifiable depuis la page |
+| Liste déroulante | Liste de sélection dans l'en-tête, qui pilote les autres blocs |
+
+**Comportements repris de Grist**
+- Liaisons entre vues : filtre, curseur, tables de synthèse.
+- Mise en forme : couleurs, gras, règles conditionnelles de cellule et de ligne, pastilles des choix.
+- Descriptions de colonnes en infobulle.
+- Fiche d'un enregistrement référencé, ouverte en fenêtre superposée.
+- **Édition** des champs, si le bloc l'autorise :
+  - texte, nombres, dates, choix, références, références multiples ;
+  - conditions des listes déroulantes ;
+  - les règles d'accès de Grist s'appliquent, les lecteurs restent en lecture seule.
+
+**Filtrer**
+- **Listes de sélection** dans l'en-tête :
+  - regroupement et ordre réglables ;
+  - synchronisation d'une page à l'autre ;
+  - liste masquée automatiquement quand une seule entrée est possible (selon les droits).
+- **Filtre rapide par bloc** : boutons `Tous | valeur 1 | valeur 2…` sur un champ au choix, avec une valeur à l'ouverture. Selon la place disponible, ils se réduisent en un bouton unique, puis en une icône.
+
+**Mise en page**
+- Grille de 6 colonnes : largeur, colonne de départ, hauteur en rangées, retour à la ligne.
+- Mode ultracompact : blocs ajustés à leurs données.
+- Mode empilé sans trous.
+- **Mode Disposition** : déplacer et redimensionner les blocs à la souris.
+- Blocs repliables, état à l'ouverture réglable, blocs figés à l'écran, plein écran.
+- Affichage adapté aux smartphones, avec les listes de sélection sur une seule ligne.
+
+**Navigation et export**
+- Menu commun à toutes les configurations. Les pages que l'utilisateur ne peut pas lire sont masquées, et un lien peut être conditionné à l'accès à une table.
+- Changement de configuration instantané dans le widget : une seule page Grist peut accueillir toutes les configurations.
+- Impression / PDF.
+
+**Aide intégrée**
+- **Aide** (dans le menu ☰) : guide, nouveautés et README (ce dernier réservé aux administrateurs), lus directement dans les fichiers du dépôt.
+- Pastille signalant une nouvelle version.
+
+---
+
+## Contenu du dépôt
+
+| Fichier | Rôle |
+|---|---|
+| `index.html` | La page du widget (structure HTML), servie par défaut par GitHub Pages |
+| `ux-widget.js` | Le script du widget |
+| `ux-widget.css` | Les styles du widget |
+| `qpv-bretagne.geojson` | Périmètres des quartiers prioritaires 2024 (22, 29, 35, 56), facultatif |
+| `aia.png` | Icône AIA (« assisté par l'IA ») de Martine Peters, affichée dans l'aide |
+| `README.md` | Ce document : installation et fonctionnement technique (onglet « À propos » de l'aide) |
+| `GUIDE-UTILISATEUR.md` | Guide des utilisateurs (onglet « Guide ») |
+| `GUIDE-ADMINISTRATEUR.md` | Guide des administrateurs : composer les pages (onglet « Administration », visible des seuls administrateurs) |
+| `CHANGELOG.md` | Journal des modifications (onglet « Nouveautés ») |
+| `LICENSE` | Licence MIT du code, et ce qu'elle ne couvre pas |
+
+Les quatre fichiers Markdown sont lus par le widget : ils doivent rester à côté de `index.html`, avec ces noms.
+
+---
+
+## Installation
+
+Le widget tient en **trois fichiers** (`index.html`, `ux-widget.js`, `ux-widget.css`), sans étape de construction.
+
+1. **Héberger les fichiers** : déposer `index.html`, `ux-widget.js`, `ux-widget.css`, `qpv-bretagne.geojson`, les fichiers Markdown et `aia.png` dans un dépôt GitHub (par exemple `ux-widget-grist`), puis activer **GitHub Pages** (*Settings → Pages → Deploy from a branch → main / root*).
+   Adresse obtenue :
+   ```
+   https://<compte>.github.io/<dépôt>/
+   ```
+2. **Ajouter le widget dans Grist** :
+   - *Ajouter un widget → Personnalisé*, sur n'importe quelle table ;
+   - *URL personnalisée* : coller l'adresse ci-dessus ;
+   - *Niveau d'accès* : **Accès complet au document**. Le widget doit lire les métadonnées des vues.
+3. **Choisir l'apparence** : dans la configuration, section Affichage, un administrateur choisit le **style État (DSFR)**, réservé aux services de l'État, ou le **style neutre**, pour toute autre structure (voir [Apparence et DSFR](#apparence-et-dsfr)). Par défaut : style État.
+4. **Mettre à jour** : remplacer les fichiers modifiés dans le dépôt (en général `index.html`, `ux-widget.js` et `ux-widget.css` ensemble, car `index.html` porte le numéro de version des deux autres), attendre la republication (1 à 2 minutes), puis recharger Grist avec **Ctrl+F5**. La version installée s'affiche en bas du panneau de configuration.
+
+**Organisation recommandée**
+- Garder les vues natives sur des pages « support », éventuellement masquées aux utilisateurs.
+- Placer le widget sur **une seule page** d'affichage.
+- Dans le menu de navigation, activer *Changer de page dans le widget* et choisir **— ce widget —** pour chaque lien.
+
+> Tout autre hébergement statique en HTTPS convient aussi, par exemple un serveur interne. Le fichier GeoJSON des QPV doit être placé à côté du widget, ou son adresse indiquée dans la configuration de la carte.
+
+**Migration depuis l'ancien nom (« page composée »)**
+- Le dépôt s'appelle désormais `ux-widget-grist` et le widget est servi à sa racine (`index.html`) : mettre à jour l'URL du widget dans Grist.
+- Les configurations enregistrées sont conservées.
+
+---
+
+## Préparer le document Grist
+
+Le widget enregistre sa configuration **dans le document**. Elle survit donc aux mises à jour du code.
+
+| Table | Rôle | Création |
+|---|---|---|
+| `W_Composition` | Une ligne par configuration (`Nom`, `Config` en JSON). Contient aussi la ligne réservée `_Navigation` (menu commun, apparence). Une ligne `_Securite` héritée des versions antérieures à 0.8.10 n'est plus utilisée | Automatique au premier enregistrement |
+| `W_Admin` | Détermine qui peut configurer : seules les personnes qui **lisent au moins une ligne** de cette table ont accès à **Configurer** et **Disposition** | Automatique au premier enregistrement (avec une ligne), ou à créer à la main |
+
+**Règles d'accès recommandées**
+- `W_Admin` : lecture réservée aux propriétaires, par exemple refuser la lecture si `user.Access != OWNER`.
+- `W_Composition` : lecture pour tous, **modification réservée aux propriétaires**.
+
+Masquer les boutons n'est qu'un confort. La vraie protection, ce sont ces règles d'accès.
+
+**Fermé par défaut** (depuis 0.8.10) : si `W_Admin` est absente ou illisible, personne ne peut configurer, sauf dans un document qui n'a encore aucune configuration (installation). Le premier enregistrement crée alors `W_Admin` avec une ligne ; tant qu'aucune règle d'accès ne la protège, tous les éditeurs peuvent configurer. Pensez à poser la règle juste après l'installation.
+
+Pour vérifier : *Règles d'accès → Voir en tant que* un éditeur, puis ouvrir la page du widget : ni le bouton ⚙ Configurer ni l'action ☰ → Disposition ne doivent apparaître.
+
+La composition des pages (choix des vues, réglages des blocs, filtres rapides, menu) est décrite dans le [guide d'administration](GUIDE-ADMINISTRATEUR.md).
+
+---
+
+## Cartes et zonages
+
+Un bloc carte reprend le widget carte de Grist : colonnes Nom / Latitude / Longitude, fond de carte. Les coordonnées en Lambert 93 et les virgules décimales sont acceptées.
+
+**Points**
+- **Étiquette** : par défaut la colonne « Name » de la carte Grist. Si elle contient du HTML, l'étiquette s'ouvre au clic, après nettoyage.
+- **Couleur selon** une colonne.
+- **Contour selon** une colonne, avec 3 couleurs choisies au plus, ou selon la **situation QPV**.
+
+**Zonages** (sous les points)
+
+| Zonage | Source | Remarque |
+|---|---|---|
+| Communes | [geo.api.gouv.fr](https://geo.api.gouv.fr) | Communes qui contiennent des points |
+| EPCI | geo.api.gouv.fr, communes fusionnées | EPCI entiers |
+| IRIS | Géoplateforme IGN, couche WFS `STATISTICALUNITS.IRISGE:iris_ge` | IRIS des communes découpées ; les autres communes en entier (code IRIS : code INSEE + `0000`) |
+| Circonscriptions législatives | Fichier `circonscriptions-bretagne.geojson` déposé à côté du widget (extrait du fichier national data.gouv.fr) | Circonscriptions qui contiennent des points |
+| Secteurs de collège | Fichier `secteurs-colleges-bretagne.geojson` déposé à côté du widget (extrait du fichier national data.gouv.fr) | Secteurs qui contiennent des points |
+| Regroupements de communes | Table Grist des communes (ex. `P_Communes` : code INSEE + réseau pédagogique), contours geo.api.gouv.fr fusionnés | Regroupements qui contiennent des points, dessinés en entier |
+| QPV | Fichier GeoJSON fourni (QPV 2024, ANCT) | Points dans un QPV ou à moins de X m |
+
+**Second zonage** : un deuxième découpage peut être tracé en pointillés noirs, sans couleur de fond, par-dessus le premier. On croise ainsi, par exemple, les communes colorées et les circonscriptions législatives.
+
+**Commune des points** : lue dans une colonne de code INSEE (directement ou via une référence), sinon **déduite de la position du point**.
+
+**Couleur des zones**
+- Une couleur par zone, ou un dégradé selon le nombre de points ou la somme d'une colonne.
+- Ou une valeur lue dans **une table Grist reliée par code** (code INSEE, SIREN, code IRIS).
+
+**Couche QPV pour un autre territoire**
+1. Télécharger les périmètres sur [data.gouv.fr (ANCT)](https://www.data.gouv.fr/datasets/quartiers-prioritaires-de-la-politique-de-la-ville-qpv).
+2. Filtrer les départements voulus.
+3. Convertir en WGS84 (EPSG:4326).
+4. Déposer le fichier à côté du widget, puis indiquer son nom dans l'option *Fichier des QPV*.
+
+**Fichiers des circonscriptions législatives et des secteurs de collège (Bretagne)**
+
+Les fichiers nationaux sont trop lourds pour être lus à chaque ouverture : on en extrait la région une fois, avec [mapshaper.org](https://mapshaper.org). Le site travaille dans le navigateur et n'envoie pas le fichier sur un serveur.
+1. Télécharger le fichier national depuis data.gouv.fr : [circonscriptions législatives](https://www.data.gouv.fr/api/1/datasets/r/dbf42fce-a563-412e-9db1-1f7ab453c2ef), [secteurs de collège](https://www.data.gouv.fr/api/1/datasets/r/36ace01a-2d9c-4001-9473-39e6fc7a0ad8).
+2. Le glisser sur mapshaper.org (un ZIP de shapefile se dépose tel quel), puis ouvrir la **Console** (en haut à droite).
+3. Taper `info` : la console liste les **champs** de chaque zone (avec un exemple) et l'**emprise** (*Bounds*).
+   - Emprise de l'ordre de −5 à 9 et 41 à 51 : coordonnées en degrés (WGS84), rien à faire.
+   - Grands nombres (ex. 100 000 à 1 200 000) : Lambert 93 ; taper `proj wgs84`.
+4. Ne garder que la Bretagne (22, 29, 35, 56), en adaptant le nom du champ à celui que montre `info` :
+   - circonscriptions : `filter '["22","29","35","56"].indexOf(String(codeDepartement)) > -1'` ;
+   - secteurs de collège, avec un champ département : même commande avec ce champ ; sinon, avec l'UAI du collège (ses 3 premiers caractères donnent le département) : `filter '["022","029","035","056"].indexOf(String(UAI).slice(0,3)) > -1'`.
+5. Facultatif, pour alléger : `simplify 20% keep-shapes`, puis vérifier à l'écran que les contours restent fidèles.
+6. Exporter : `o format=geojson`, ou bouton **Export** → GeoJSON. Renommer le fichier `circonscriptions-bretagne.geojson` ou `secteurs-colleges-bretagne.geojson`.
+7. Déposer le fichier dans le dépôt GitHub, à côté de `index.html` (Add file → Upload files). Il est publié avec le widget.
+
+**Secteurs de collège à partir de la carte scolaire (adresses)** : la carte scolaire des collèges publics ([data.gouv.fr](https://www.data.gouv.fr/datasets/carte-scolaire-des-colleges-publics), ou un export Affelnet) ne contient pas de contours, mais des adresses rattachées à des collèges. L'outil `outils/secteurs-colleges.html` en construit le fichier de zonage :
+1. Ouvrir `outils/secteurs-colleges.html` dans le navigateur (depuis le site du widget, ou le fichier enregistré sur le poste).
+2. Choisir le CSV : le fichier national est accepté, seules les lignes des départements indiqués sont gardées.
+3. Vérifier les colonnes proposées (code INSEE de la commune, UAI du collège, nom du collège) et la liste des départements.
+4. **Construire le fichier**, puis télécharger `secteurs-colleges-bretagne.geojson` et le déposer à côté de `index.html`.
+
+Chaque secteur réunit les communes rattachées à un seul collège. Une commune découpée par rues entre plusieurs collèges forme une zone « partagée » à part. Le fichier CSV reste dans le navigateur : seuls les codes de département sont envoyés à geo.api.gouv.fr pour obtenir les contours des communes.
+
+**Plusieurs fichiers** : l'option « Fichier : … » accepte plusieurs noms séparés par des virgules, par exemple `secteurs-colleges-bretagne.geojson, secteurs-colleges-22.geojson` pour compléter la carte scolaire nationale par un fichier départemental (les Côtes-d'Armor n'y figurent pas en 2026). Un collège présent dans deux fichiers, comme un collège dont le secteur couvre deux départements, ne forme qu'une zone.
+
+Le widget reconnaît le code et le nom de chaque zone d'après le nom des champs : `codeCirconscription`, `nomCirconscription`, `codeDepartement` pour les circonscriptions ; `UAI` (ou `code_rne`) et le nom du collège pour les secteurs. Des noms très différents peuvent nécessiter un ajustement du widget.
+
+
+### Distancier routier (`outils/distancier.html`)
+
+Widget personnalisé Grist séparé, pour les administrateurs : il calcule les distances par la route de chaque école vers ses N écoles les plus proches **par la route** et vers son collège de secteur, et les ajoute à une table de distances.
+
+- **Installation** : ajouter une vue « Widget personnalisé », adresse `https://ligures.github.io/ux-widget-grist/outils/distancier.html`, accès **complet**.
+- **Services** (paramètre « Service ») :
+  - **Metric-OSRM (Insee)**, par défaut : serveur OSRM de l'Insee (`metric-osrm-backend.lab.sspcloud.fr`, données OpenStreetMap, sans clé, présenté comme expérimental). Service « table » : une école vers 25 candidates en un seul appel. Option **Sans bateaux** (cochée) : les liaisons maritimes sont exclues, une école d'île n'est reliée qu'aux écoles de la même île.
+  - **IGN (Géoplateforme)** : `data.geopf.fr/navigation/itineraire`, un trajet par appel, moteur `bdtopo-valhalla` (`bdtopo-osrm` a été retiré en 2026), 1 appel par seconde au plus. Le bouton **Tester un appel** retrouve l'adresse et le moteur qui répondent.
+- **Table des distances** (par défaut `REF_DISTANCES`) : `Depart` et `Arrivee` (références à la table des établissements), `Km`, `Minutes` (numériques), `Statut` (texte : `ok`, ou `retour` pour une distance recopiée du trajet inverse), `Calcule_le` (date). Les échecs ne sont jamais enregistrés.
+- **Paramètres** (enregistrés avec la vue) : table et colonnes des établissements (par défaut `REF_ETAB`, `latitude`, `longitude`, `Type_etablissement` contenant « Ecole », `UAI_College` en référence ou en code UAI), **restriction** facultative (par défaut `Statut_public_prive` contenant « Public »), nombre N (5), garde-fou de 40 candidates par école, débit (1 appel par seconde).
+- **Méthode exacte** : la distance routière n'est jamais inférieure à la distance à vol d'oiseau. Les candidates sont essayées par distance à vol d'oiseau croissante, et le calcul s'arrête dès que la N-ième meilleure distance routière est inférieure à la distance à vol d'oiseau de la suivante. Un estuaire ou une rade fait simplement essayer plus de candidates.
+- **Économie d'appels** : une paire déjà dans la table n'est jamais redemandée ; une paire connue dans l'autre sens est recopiée (`retour`). Relancer ne calcule que ce qui manque. Écritures par lots de 25 lignes : un arrêt ou une erreur ne perd rien.
+- **Volume** : avec Metric-OSRM, environ 25 lignes par école (le premier lot de candidates est conservé), plus une par collège.
+---
+
+## Sécurité et confidentialité
+
+- **Droits** : le widget passe par l'API de Grist et ne contourne aucune règle d'accès. Les lecteurs ne peuvent rien modifier.
+- **Affichage des données** : toutes les valeurs insérées dans la page sont échappées.
+- **HTML des étiquettes de carte** : nettoyé par DOMPurify. La mise en forme est conservée ; scripts et gestionnaires d'événements sont retirés.
+- **Politique de sécurité (CSP)** : la page n'accepte que ses propres scripts (`ux-widget.js`) et ceux de Grist et de jsDelivr ; tout script en ligne, ou injecté dans une valeur, est refusé par le navigateur. Les connexions sont limitées au site du widget, à jsDelivr et aux services géographiques publics (geo.api.gouv.fr, data.geopf.fr). `unsafe-eval` reste autorisé pour Plotly (graphiques avancés).
+- **Bibliothèques externes** : versions figées, vérifiées par empreinte d'intégrité (SRI). Un fichier altéré sur le CDN est refusé.
+- **Liens du menu** : seules les adresses `https://` sont acceptées.
+- **Export des cartes** : le fichier HTML exporté contient les points, étiquettes, infobulles et zones visibles par la personne au moment de l'export. Une fois enregistré ou envoyé, il échappe aux règles d'accès de Grist. Il charge Leaflet depuis jsDelivr (empreinte SRI) et le fond de carte depuis son service habituel. L'option « Export réservé aux administrateurs » masque le bouton aux autres utilisateurs.
+- **Données envoyées à des services tiers (cartes)** : aucune valeur des tables (noms, effectifs, IPS, étiquettes…) ne quitte le navigateur. Seuls des codes géographiques, et parfois une position, partent vers des services publics :
+
+  | Service | Ce qui est envoyé | Quand |
+  |---|---|---|
+  | geo.api.gouv.fr (Etalab) | le **code du département** (22, 29…) | zonage par communes ou EPCI : contours de toutes les communes du département |
+  | geo.api.gouv.fr | les **coordonnées d'un point** (latitude, longitude) | seulement pour un point sans code INSEE, afin de trouver son département |
+  | data.geopf.fr (IGN) | des **codes INSEE de communes** | zonage IRIS : contours des IRIS de ces communes |
+  | Fond de carte (OpenStreetMap par défaut, ou le fournisseur réglé dans la carte Grist) | les numéros des tuiles affichées | toujours : le fournisseur voit la zone regardée, pas les points |
+  | Fichiers QPV, circonscriptions, secteurs de collège | rien | lus sur le même site que le widget |
+
+  Comme pour toute page web, chaque service voit aussi l'adresse IP de l'utilisateur et le site d'origine de la demande. Les bibliothèques (jsDelivr) sont téléchargées sans aucune donnée du document.
+- **Compte d'hébergement** : quiconque peut modifier le dépôt modifie le widget de tous les utilisateurs. Activez la double authentification et limitez les droits d'écriture.
+
+---
+
+## Dépendances
+
+Toutes sont chargées depuis un CDN, en version figée, avec empreinte d'intégrité.
+
+| Bibliothèque | Version | Usage | Chargement |
+|---|---|---|---|
+| grist-plugin-api | — | API des widgets Grist | Au démarrage |
+| Chart.js | 4.4.1 | Graphiques natifs | Au démarrage |
+| Leaflet | 1.9.4 | Cartes | À la première carte |
+| Plotly | 2.35.2 | Graphiques avancés | Au premier graphique avancé |
+| DOMPurify | 3.2.6 | Nettoyage du HTML (étiquettes, aide, Markdown) | Si une étiquette contient du HTML, à l'aide, au premier widget Markdown |
+| polygon-clipping | 0.15.7 | Fusion des communes en EPCI | Avec le zonage EPCI |
+| marked | 12.0.2 | Mise en forme de l'aide et des widgets Markdown | À la première ouverture de l'aide ou au premier widget Markdown |
+
+Police : Marianne (style État), chargée depuis le paquet `@gouvfr/dsfr` 1.14.4 ; police du système en style neutre.
+
+### Apparence et DSFR
+
+Le widget est **inspiré** du Système de design de l'État (DSFR), sans en être une implémentation officielle : il ne charge ni le CSS ni le JavaScript du DSFR.
+
+- **Style État (DSFR)** : police Marianne, bleu France (`#000091`). Le DSFR et la police Marianne sont réservés aux services de l'État par leurs [conditions d'utilisation](https://www.systeme-de-design.gouv.fr/composants-et-modeles).
+- **Style neutre** : police du système, rouge bordeaux (`#8c1c2c`). À utiliser par toute autre structure (collectivité, association, entreprise…).
+
+Le choix est commun au document ; il est enregistré dans la ligne `_Navigation` de `W_Composition` (`nav.theme`). Sans choix enregistré, le widget s'affiche en style État.
+
+---
+
+## Structure du code
+
+Les trois fichiers sont commentés. Un **sommaire** en tête de `ux-widget.js` décrit les parties, le cycle de vie, le stockage et le schéma de configuration. Chaque fonction est précédée d'une ligne d'explication.
+
+```
+index.html      en-tête (menu, barre d'outils, listes de sélection), grille, panneau, aide ;
+                politique de sécurité (CSP) ; charge ux-widget.css et ux-widget.js
+ux-widget.css   grille, blocs, tableaux, fiches, filtres rapides, cartes, panneau de configuration, impression
+ux-widget.js
+  État (objet S), VERSION et utilitaires
+  Métadonnées      loadMeta, getInfo           lecture des vues Grist
+  Données          rowsFor, selectedRowId      filtres, tri, liaisons
+  Filtre rapide    qfCol, qfApply, qfHtml, fitQf
+  Rendu des blocs  renderTable, renderSingle, renderCards, renderChart,
+                   renderAdvChart, renderMap (+ zonages, QPV, IRIS)
+  Rendu principal  render() via scheduleRender()
+  Aide             openHelp, helpLoad          fichiers Markdown du dépôt
+  Interactions, mode Disposition, export, configuration, navigation, démarrage (init)
+```
+
+**Cycle de vie**
+1. `grist.onOptions` → `init()` : métadonnées, configurations, menu, droits.
+2. `render()` : premier affichage.
+3. Ensuite, toute modification passe par `scheduleRender()`. Un rendu doublé par un plus récent est abandonné. Les dessins lourds (cartes, graphiques, grands tableaux) sont différés après l'affichage.
+
+**Règles de contribution**
+- Toute valeur issue des données ou de la configuration passe par `esc()` avant d'être insérée en HTML.
+- Une nouvelle bibliothèque est ajoutée à `LIBS`, avec sa version figée et son empreinte SRI.
+- Une nouvelle option de bloc est déclarée dans `renderConfig()`, avec une explication au survol.
+- Aucun script ni attribut `on…=` dans la page : la CSP les refuse. Les événements se branchent dans `ux-widget.js` (`addEventListener`).
+- Une nouvelle adresse externe (service, CDN) doit être ajoutée à la CSP de `index.html`.
+- Chaque version incrémente `VERSION` (dans `ux-widget.js`), le numéro `?v=…` des deux liens de `index.html` (pour vider le cache des navigateurs), et ajoute une entrée au `CHANGELOG.md`. Les utilisateurs voient alors la pastille « nouvelle version » sur le bouton Aide.
+
+**Diagnostic** : la console du navigateur affiche une ligne `[UX widget] page « … » calculée en … ms`. Elle donne le nombre de blocs affichés, masqués ou non pris en charge, et la raison pour chaque bloc vide.
+
+---
+
+## Limites connues
+
+- Formulaires et widgets personnalisés autres que carte et graphique avancé : non affichés.
+- Conditions de liste déroulante qui utilisent `user` : la liste complète est proposée, et Grist valide à l'enregistrement.
+- Contours geo.api.gouv.fr simplifiés : de fins traits peuvent subsister à l'intérieur d'un EPCI fusionné.
+- Filtre rapide : son choix n'est pas mémorisé au rechargement (retour à la valeur à l'ouverture).
+- Très grandes tables (plusieurs centaines de milliers de lignes) : le premier chargement peut prendre quelques secondes. Les tables sont ensuite en cache.
+
+---
+
+## Licence et sources des données
+
+- **Code** : © 2026 Ligures, [licence MIT](LICENSE). Elle couvre uniquement le code et la documentation.
+- **Police Marianne et identité visuelle de l'État** : non couvertes par la licence MIT ; soumises aux conditions d'utilisation du DSFR (voir [Apparence et DSFR](#apparence-et-dsfr)).
+- **QPV 2024** : © ANCT, [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/).
+- **Contours des communes et EPCI** : [API Découpage administratif](https://geo.api.gouv.fr), IGN / INSEE.
+- **Contours IRIS** : © IGN – INSEE, via la Géoplateforme.
+- **Circonscriptions législatives, secteurs de collège** : extraits de fichiers publiés sur data.gouv.fr, sous la licence indiquée sur leur page.
+- **Fond de carte** : © contributeurs [OpenStreetMap](https://www.openstreetmap.org/copyright).
+- **Icône AIA** : © 2023 Martine Peters, [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) — [Acronymes et icônes pour une utilisation transparente de l'IA](https://mpeters.uqo.ca/utilisation-transparente-de-lintelligence-artificielle/).

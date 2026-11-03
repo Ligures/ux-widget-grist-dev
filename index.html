@@ -1,0 +1,178 @@
+<!doctype html>
+<!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  UX widget grist — widget personnalisé Grist (version 0.9.4.27)              ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  Affiche sur une seule page, condensée et lisible, plusieurs vues natives d'un
+  document Grist (tableaux, fiches, listes de fiches, graphiques natifs et avancés,
+  cartes, listes déroulantes). Le widget ne copie rien : il RELIT la configuration
+  des vues Grist (tables de métadonnées _grist_*) et en reproduit le rendu.
+
+  Développeur : Ligures.
+  Trois fichiers, sans étape de construction (0.9.0) : index.html (structure),
+  ux-widget.css (styles), ux-widget.js (script). Le script n'est plus dans la page :
+  la politique de sécurité (CSP) interdit tout script en ligne.
+  Historique des versions : CHANGELOG.md · Guides : GUIDE-UTILISATEUR.md, GUIDE-ADMINISTRATEUR.md
+  Hébergement : GitHub Pages, à côté de qpv-bretagne.geojson (couche QPV).
+  Accès requis dans Grist : « Accès complet au document ».
+
+  Plan
+    index.html     en-tête (menu des pages, barre d'outils, listes de sélection),
+                   grille des blocs, panneau de configuration, aide.
+    ux-widget.css  styles. ux-widget.js : script (sommaire en tête).
+  Mise à jour : changer aussi le numéro ?v=… des deux liens ci-dessous (cache).
+-->
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UX widget grist</title>
+    <meta name="author" content="Ligures" />
+    <!-- Politique de sécurité : aucun script en ligne ; sources limitées (Grist, jsDelivr, services géographiques publics) -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://docs.getgrist.com https://cdn.jsdelivr.net 'unsafe-eval'; style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; font-src 'self' https://cdn.jsdelivr.net data:; img-src 'self' https: data: blob:; connect-src 'self' https://geo.api.gouv.fr https://data.geopf.fr https://cdn.jsdelivr.net; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'none'" />
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"
+      integrity="sha384-dug+JxfBvklEQdJ4AYuBBAIScUz0bVN73xpy273gcAwHjb3qI0fXmuYNaNfdyYJG"
+      crossorigin="anonymous"
+    ></script>
+    <link rel="stylesheet" href="ux-widget.css?v=0.9.4.27" />
+  </head>
+  <body>
+    <header id="top">
+      <nav id="pnav"></nav>
+      <div class="bar">
+        <h1 id="title"></h1>
+        <span class="spacer"></span>
+        <!-- liens vers des formulaires Grist (réglés par page, facultatifs) -->
+        <span id="forms"></span>
+        <!-- actions directes (0.8.10.1) : actualiser, configurer (administrateurs) -->
+        <button
+          class="tb ico"
+          id="btnRefresh"
+          aria-label="Actualiser"
+          data-tip="Actualiser : recharger les données et la configuration des vues"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+            <path d="M20 4v5h-5" /></svg
+          ><span class="lbl">Actualiser</span>
+        </button>
+        <button
+          class="tb ico"
+          id="btnConfig"
+          aria-label="Configurer"
+          data-tip="Configurer : choisir et régler les vues"
+          hidden
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"
+            /></svg
+          ><span class="lbl">Configurer</span>
+        </button>
+        <!-- menu hamburger : les boutons de la barre d'outils sont regroupés dans une liste déroulante -->
+        <button class="tb" id="btnMenu" aria-haspopup="menu" aria-expanded="false" aria-controls="tbMenu" data-tip="Menu : actions de la page">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg
+          ><span class="lbl">Menu</span><span class="newdot" hidden></span>
+        </button>
+        <div class="tbmenu" id="tbMenu" role="menu" hidden>
+        <button class="tb" id="btnFold" data-tip="Tout déplier">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9l5-5 5 5M7 15l5 5 5-5" /></svg
+          ><span class="lbl">Tout déplier</span>
+        </button>
+        <button class="tb" id="btnSingle" aria-label="Plein écran" data-tip="Plein écran : ouvrir cette page dans un nouvel onglet, sans les menus de Grist" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg
+          ><span class="lbl">Plein écran</span>
+        </button>
+        <button class="tb" id="btnPrint" aria-label="Imprimer" data-tip="Imprimer la page ou l'enregistrer en PDF">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 9V3h12v6" />
+            <rect x="3" y="9" width="18" height="8" rx="1.5" />
+            <path d="M6 14h12v7H6z" />
+            <path d="M17.5 12h.01" /></svg
+          ><span class="lbl">Imprimer</span>
+        </button>
+        <button
+          class="tb"
+          id="btnLayout"
+          aria-label="Disposition"
+          data-tip="Disposition : déplacer et redimensionner les blocs"
+          hidden
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="3" width="8" height="8" rx="1" />
+            <rect x="13" y="3" width="8" height="5" rx="1" />
+            <rect x="13" y="10" width="8" height="11" rx="1" />
+            <rect x="3" y="13" width="8" height="8" rx="1" /></svg
+          ><span class="lbl">Disposition</span>
+        </button>
+        <button class="tb" id="btnHelp" aria-label="Aide" data-tip="Aide : guide d'utilisation et nouveautés">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.6v.6" />
+            <path d="M12 17.5h.01" /></svg
+          ><span class="lbl">Aide</span><span class="newdot" hidden></span>
+        </button>
+        </div>
+      </div>
+      <div id="status">Chargement…</div>
+      <div id="filters"></div>
+      <div id="lybar" hidden>
+        <span
+          ><b>Mode disposition</b> — glissez un bloc par son en-tête pour le déplacer, tirez son coin ◢ pour changer sa
+          largeur (et sa hauteur en lignes).</span
+        >
+        <span class="spacer"></span>
+        <button class="btn" id="lyCancel">Annuler</button
+        ><button class="btn primary" id="lySave">Enregistrer la disposition</button>
+      </div>
+    </header>
+    <div id="printhead"></div>
+    <main id="grid" class="grid"></main>
+    <div id="rcBack"></div>
+    <div id="rc" role="dialog" aria-modal="true"></div>
+    <div id="help" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden>
+      <div class="hbox">
+        <div class="hhead">
+          <img class="aia-mini" src="aia.png" alt="AIA – assisté par l'IA" title="AIA – assisté par l'intelligence artificielle" height="30" />
+          <h3 id="helpTitle">Aide</h3>
+          <nav class="htabs" role="tablist"></nav>
+          <button class="btn" id="helpClose" title="Fermer (Échap)">✕</button>
+        </div>
+        <div class="hbody md"></div>
+      </div>
+    </div>
+
+    <!-- message d'accueil (0.9.3) : texte Markdown réglé par l'administrateur, affiché au démarrage -->
+    <div id="welcome" role="dialog" aria-modal="true" aria-label="Message d'accueil" hidden>
+      <div class="wbox">
+        <div class="wbody md"></div>
+        <div class="wfoot">
+          <span class="wnote">Ce message ne s'affichera plus, sauf s'il est modifié. Pour le revoir : Aide → « Message d'accueil ».</span>
+          <button class="btn primary" id="wClose" title="Fermer (Échap)">Fermer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- formulaire Grist ouvert dans une fenêtre (0.8.8) -->
+    <div id="fmodal" role="dialog" aria-modal="true" aria-labelledby="fmTitle" hidden>
+      <div class="fmbox">
+        <div class="hhead">
+          <h3 id="fmTitle">Formulaire</h3>
+          <span class="fmmsg" aria-live="polite"></span>
+          <a class="btn" id="fmTab" target="_blank" rel="noopener noreferrer" title="Ouvrir le formulaire dans un nouvel onglet">↗</a>
+          <button class="btn" id="fmClose" title="Fermer (Échap)">✕</button>
+        </div>
+        <iframe id="fmFrame" title="Formulaire" referrerpolicy="no-referrer"></iframe>
+      </div>
+    </div>
+
+    <div id="config" hidden>
+      <div class="panel" id="panel"></div>
+    </div>
+
+    <script src="ux-widget.js?v=0.9.4.27"></script>
+  </body>
+</html>
