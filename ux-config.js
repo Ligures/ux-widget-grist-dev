@@ -1,4 +1,4 @@
-/* UX widget grist — panneau de configuration ⚙ (version 0.9.5.1). Développeur : Ligures. Licence MIT (voir LICENSE).
+/* UX widget grist — panneau de configuration ⚙ (version 0.9.5.2). Développeur : Ligures. Licence MIT (voir LICENSE).
    Chargé à la demande par ux-widget.js (openConfig → loadPart("config")), après ux-carte.js dont il utilise les
    réglages de zonage. Partage l'espace global de ux-widget.js, qui doit être chargé avant.
    Contenu : brouillon de configuration (draft), réglages par bloc (renderConfig), couleurs des cartes et des
@@ -7,6 +7,7 @@
 "use strict";
 /* ---------- Panneau de configuration ---------- */
 let draftNav = { url: "", items: [] };
+const refreshOf = (n) => (n?.refresh === undefined || n?.refresh === null ? 20 : Number(n.refresh) || 0); // actualisation (s)
 // vues retenues dont les réglages sont dépliés dans la configuration (identifiants de vue). Par défaut, toutes
 // sont repliées : seuls restent le titre, les flèches et la place dans la grille (largeur, colonne, lignes) ;
 // non enregistré
@@ -813,6 +814,11 @@ ${L(
     .join("")}</select>`,
   "Par défaut, le widget passe en mode sombre quand l'ordinateur de l'utilisateur est réglé ainsi (réglage du système, pas celui de Grist). L'impression reste toujours claire. Commun à toutes les pages du document.",
 )}
+${L(
+  "Actualisation automatique",
+  `<select id="cRefresh">${REFRESH_CHOICES.map(([v, t]) => `<option value="${v}" ${refreshOf(draftNav) === v ? "selected" : ""}>${t}</option>`).join("")}</select>`,
+  "Le widget vérifie à cet intervalle si le document a été modifié (saisie dans une autre table, par un autre utilisateur…) et, si oui, relit les données et redessine la page. Rien n'est vérifié tant que l'onglet est caché ou qu'une saisie est en cours. « désactivée » : seul le bouton Actualiser relit les données. Commun à toutes les pages du document.",
+)}
 ${C('id="cHideFields"', draft.hideEmptyFields, "Masquer les champs vides dans les fiches", "Les champs sans valeur ne sont pas affichés dans les fiches (sauf en édition, ou si le bloc demande à les afficher).")}
 ${C('id="cHideBlocks"', draft.hideEmptyBlocks, "Masquer les blocs sans données", "Un bloc sans aucune ligne à afficher (par exemple après filtrage) disparaît de la page.")}
 ${L("Hauteur des graphiques (px)", `<input type="number" id="cChartH" min="100" step="20" value="${draft.chartHeight || 260}" style="width:80px">`, "Hauteur par défaut des graphiques d'une ligne.")}
@@ -1126,6 +1132,7 @@ $("#panel").addEventListener("change", (ev) => {
   if (t.id === "cShowAfter") draftShowAfter = t.checked;
   if (t.id === "cTheme") draftNav.theme = t.value;
   if (t.id === "cMode") draftNav.mode = t.value;
+  if (t.id === "cRefresh") draftNav.refresh = Number(t.value);
   if (t.id === "cMnHome") draftNav.home = t.value;
   if (t.id === "cWelcome") draftNav.welcome = t.value;
   if (t.dataset.fml) draft.forms[Number(t.dataset.fml)].label = t.value.trim();
@@ -1251,6 +1258,7 @@ $("#panel").addEventListener("click", async (ev) => {
       if (JSON.stringify(draftNav) !== JSON.stringify(S.nav)) {
         S.nav = draftNav;
         S.navAccess = {};
+        liveStart();
         try {
           await saveConfigToTable({ name: NAV_NAME, nav: draftNav });
         } catch {
@@ -1280,6 +1288,7 @@ $("#panel").addEventListener("click", async (ev) => {
     if (JSON.stringify(draftNav) !== JSON.stringify(S.nav)) {
       S.nav = draftNav;
       S.navAccess = {};
+      liveStart();
       try {
         await saveConfigToTable({ name: NAV_NAME, nav: draftNav });
       } catch {

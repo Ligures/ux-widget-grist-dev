@@ -1,4 +1,4 @@
-/* UX widget grist — script principal (version 0.9.5.1). Développeur : Ligures. Licence MIT (voir LICENSE).
+/* UX widget grist — script principal (version 0.9.5.2). Développeur : Ligures. Licence MIT (voir LICENSE).
    Chargé par index.html, à la fin du corps de la page. Voir le sommaire ci-dessous.
    Depuis 0.9.5, deux parties sont chargées à la demande (loadPart), dans le même espace global :
      ux-carte.js  : cartes (Leaflet, zonages, QPV, impression et export d'une carte), si la page a une carte ;
@@ -61,7 +61,7 @@
 /* ---------- État et constantes ---------- */
 // DEFAULTS — options d'une page neuve. KIND — libellé des types de vues Grist (parentKey).
 // SUPPORTED — types affichables. DEFAULT_WIDTH — largeur initiale (en sixièmes) d'un bloc ajouté.
-const VERSION = "0.9.5.1"; // voir CHANGELOG.md
+const VERSION = "0.9.5.2"; // voir CHANGELOG.md
 const DEFAULTS = {
   name: "Page composée",
   title: "",
@@ -2269,7 +2269,7 @@ function openMultiPicker(anchor, items, current, choiceOpts, onDone, onCancel) {
 async function saveValue(el, tableId, rid, col, value) {
   el.classList.add("saving");
   try {
-    await grist.docApi.applyUserActions([["UpdateRecord", tableId, rid, { [col.colId]: value }]]);
+    await docActions([["UpdateRecord", tableId, rid, { [col.colId]: value }]]);
     // données à relire : la table modifiée et ses tables de synthèse (les formules en dépendent)
     const ref = col.parentId;
     for (const [id, t] of S.meta.tables)
@@ -2838,8 +2838,7 @@ async function renderMarkdown(info, rows, body, selId, b) {
       S.editing = false;
       if (row) return saveValue(body.querySelector(".mdnote"), info.tableId, row.id, col, v);
       // pas encore de ligne : création, rattachée à la sélection liée comme « + Ajouter une ligne »
-      grist.docApi
-        .applyUserActions([["AddRecord", info.tableId, null, { ...(S.linkSet?.[info.secId] || {}), [col.colId]: v }]])
+      docActions([["AddRecord", info.tableId, null, { ...(S.linkSet?.[info.secId] || {}), [col.colId]: v }]])
         .then((res) => {
           if (res?.retValues?.[0]) S.sel[info.secId] = res.retValues[0];
           delete S.cache[info.tableId];
@@ -3692,7 +3691,7 @@ async function addRow(secId, btn) {
   if (!blockAddable(b, info)) return;
   btn.disabled = true;
   try {
-    const res = await grist.docApi.applyUserActions([["AddRecord", info.tableId, null, { ...(S.linkSet?.[secId] || {}) }]]);
+    const res = await docActions([["AddRecord", info.tableId, null, { ...(S.linkSet?.[secId] || {}) }]]);
     const rid = res?.retValues?.[0];
     const ref = info.sec.tableRef;
     for (const [id, t] of S.meta.tables)
@@ -3747,7 +3746,7 @@ async function delRow(secId, btn) {
   }
   btn.disabled = true;
   try {
-    await grist.docApi.applyUserActions([["RemoveRecord", info.tableId, rid]]);
+    await docActions([["RemoveRecord", info.tableId, rid]]);
     const ref = info.sec.tableRef;
     for (const [id, t] of S.meta.tables)
       if (id === ref || t.summarySourceTable === ref) {
@@ -4392,11 +4391,11 @@ function fixColIds(cfg) {
   return changed;
 }
 // refreshAll — Bouton Actualiser : vide les caches et relit métadonnées, configuration et données.
-async function refreshAll() {
+async function refreshAll(silent = false) {
   S.cache = {};
   S.byId = {};
   try {
-    status("Rechargement…");
+    if (!silent) status("Rechargement…");
     await loadMeta();
     fixColIds(S.cfg); // colonnes renommées dans Grist
     await render();
@@ -4404,6 +4403,70 @@ async function refreshAll() {
     status(e.message || String(e), true);
   }
 }
+/* ---------- Actualisation automatique (0.9.5.2) ----------
+   Grist ne prévient un widget que des changements de sa propre table. Pour voir les saisies faites ailleurs (autres
+   tables, autres utilisateurs), le widget lit à intervalle régulier l'état du document (GET …/states, API REST de
+   Grist avec le jeton du widget, en lecture seule) : si le dernier numéro d'action a changé, il relit les données
+   et redessine la page (refreshAll silencieux). Rien tant que l'onglet est caché, qu'une saisie est en cours ou
+   que la configuration est ouverte ; les modifications faites par le widget lui-même (docActions) ne déclenchent
+   pas de second rendu. Intervalle : nav.refresh (secondes, 0 = désactivée, 20 par défaut). */
+const REFRESH_CHOICES = [
+  [0, "désactivée"],
+  [10, "toutes les 10 s"],
+  [20, "toutes les 20 s (par défaut)"],
+  [30, "toutes les 30 s"],
+  [60, "toutes les minutes"],
+  [120, "toutes les 2 minutes"],
+];
+const refreshEvery = () => (S.nav?.refresh === undefined || S.nav?.refresh === null ? 20 : Number(S.nav.refresh) || 0);
+const live = { tok: null, exp: 0, last: null, self: false, fails: 0, timer: null, busy: false };
+// docActions — Modifie le document (applyUserActions) ; le changement d'état qui suit vient du widget lui-même.
+async function docActions(actions) {
+  const r = await grist.docApi.applyUserActions(actions);
+  live.self = true;
+  return r;
+}
+// docState — Dernier état du document (numéro et empreinte de la dernière action), par l'API REST de Grist.
+async function docState() {
+  if (!live.tok || Date.now() > live.exp) {
+    live.tok = await grist.docApi.getAccessToken({ readOnly: true });
+    live.exp = Date.now() + Math.max(30000, (live.tok.ttlMsecs || 300000) - 30000);
+  }
+  const r = await fetch(`${live.tok.baseUrl}/states?auth=${encodeURIComponent(live.tok.token)}`);
+  if (r.status === 401 || r.status === 403) live.exp = 0; // jeton expiré : redemandé au prochain essai
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const s = (await r.json())?.states?.[0];
+  return s ? `${s.n}:${s.h}` : "";
+}
+// liveCheck — Relit le document si quelqu'un l'a modifié depuis la dernière vérification.
+async function liveCheck() {
+  if (live.busy || live.fails >= 3 || document.hidden || S.editing || !refreshEvery()) return;
+  if ($("#config") && !$("#config").hidden) return;
+  live.busy = true;
+  try {
+    const st = await docState();
+    live.fails = 0;
+    const changed = live.last !== null && st !== live.last && !live.self;
+    live.last = st;
+    live.self = false;
+    if (changed && S.ready) await refreshAll(true);
+  } catch (e) {
+    if (++live.fails === 3) console.info(`[UX widget] actualisation automatique arrêtée : ${e.message || e}`);
+  } finally {
+    live.busy = false;
+  }
+}
+// liveStart — (Re)lance la vérification périodique selon le réglage du document.
+function liveStart() {
+  clearInterval(live.timer);
+  live.fails = 0;
+  const sec = refreshEvery();
+  if (sec) {
+    live.timer = setInterval(liveCheck, sec * 1000);
+    liveCheck(); // état de départ
+  }
+}
+document.addEventListener("visibilitychange", () => !document.hidden && liveCheck()); // retour sur l'onglet
 /* Droit de configurer : contrôlé par une table témoin W_Admin, protégée par une règle d'accès.
    - seuls ceux qui en lisent au moins une ligne peuvent configurer ;
    - exception : document encore sans configuration (installation). W_Admin est alors créée au premier
@@ -4483,6 +4546,8 @@ async function readNav() {
       mode: n.mode === "clair" || n.mode === "sombre" ? n.mode : "", // "" : comme le système
       home: n.home || "", // configuration ouverte à l'arrivée (mode « changer de page dans le widget »)
       welcome: typeof n.welcome === "string" ? n.welcome : "", // message d'accueil (Markdown)
+      // actualisation automatique (s) ; absente = valeur par défaut (20 s)
+      ...(REFRESH_CHOICES.some(([v]) => v === n.refresh) ? { refresh: n.refresh } : {}),
     };
   } catch {
     return { url: "", items: [] };
@@ -4748,7 +4813,7 @@ async function readStoredConfigs() {
 async function saveConfigToTable(cfg) {
   const tables = await grist.docApi.listTables();
   if (!tables.includes(CFG_TABLE)) {
-    await grist.docApi.applyUserActions([
+    await docActions([
       [
         "AddTable",
         CFG_TABLE,
@@ -4762,7 +4827,7 @@ async function saveConfigToTable(cfg) {
   if (S.adminHint && !tables.includes(ADMIN_TABLE)) {
     // installation : la table des administrateurs est créée avec une ligne (à protéger par une règle d'accès)
     try {
-      await grist.docApi.applyUserActions([
+      await docActions([
         ["AddTable", ADMIN_TABLE, [{ id: "Note", type: "Text" }]],
         ["AddRecord", ADMIN_TABLE, null, { Note: "Qui lit cette ligne peut configurer le widget : réserver la lecture aux administrateurs (règle d'accès)." }],
       ]);
@@ -4774,7 +4839,7 @@ async function saveConfigToTable(cfg) {
   const rows = toRows(await grist.docApi.fetchTable(CFG_TABLE));
   const hit = rows.find((r) => String(r.Nom || "") === cfg.name);
   const json = JSON.stringify(cfg, null, 1);
-  await grist.docApi.applyUserActions([
+  await docActions([
     hit
       ? ["UpdateRecord", CFG_TABLE, hit.id, { Config: json }]
       : ["AddRecord", CFG_TABLE, null, { Nom: cfg.name, Config: json }],
@@ -4832,6 +4897,7 @@ async function init() {
     // La table W_Composition fait foi : elle survit aux changements de code du widget
     S.stored = await readStoredConfigs();
     S.nav = await readNav();
+    liveStart();
     S.isAdmin = await checkAdmin();
     S.docKey = /\/doc\/([^/?#]+)/.exec(await guessDocUrl())?.[1] || ""; // pour les sélections partagées
     applyTheme(S.nav.theme);

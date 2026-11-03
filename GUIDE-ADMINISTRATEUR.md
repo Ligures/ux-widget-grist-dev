@@ -237,6 +237,11 @@ Sans choix, le widget s'affiche en style État. Le choix vaut pour toutes les pa
 
 En mode sombre, les couleurs choisies dans Grist (pastilles, mises en forme conditionnelles, couleurs des graphiques) sont reprises telles quelles ; le fond de carte reste clair, légèrement assombri. L'impression est toujours en couleurs claires.
 
+**Actualisation automatique** (même section) : intervalle auquel le widget vérifie si le document a été modifié ailleurs (dans une autre table, depuis une vue native de Grist, par un autre utilisateur). Si oui, il relit les données et redessine la page, en gardant la position de défilement.
+- **Toutes les 20 s** par défaut ; de 10 s à 2 minutes, ou **désactivée** (seul ⟳ Actualiser relit alors les données).
+- Rien n'est vérifié tant que l'onglet est caché, qu'une saisie ou un bloc-notes est ouvert, ou que la configuration est ouverte ; au retour sur l'onglet, la vérification est immédiate.
+- La vérification est une petite requête à l'API de Grist (état du document). Elle ne fonctionne que sur les instances autorisées dans la politique de sécurité de `index.html` (`grist.numerique.gouv.fr`, `*.getgrist.com`) ; pour une autre instance, ajouter son adresse à `connect-src`.
+
 ### Enregistrer
 
 **Enregistrer** applique la configuration et l'écrit dans la table `W_Composition` du document. Les filtres rapides reviennent alors à leur valeur à l'ouverture.
