@@ -1,0 +1,714 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://docs.getgrist.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://data.geopf.fr https://metric-osrm-backend.lab.sspcloud.fr; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'none'"
+    />
+    <title>Distancier routier</title>
+    <!--
+      Distancier routier — widget personnalisé Grist (outil d'administration de UX widget grist).
+      À installer comme vue « Widget personnalisé » avec l'accès complet au document.
+
+      Calcule les distances par la route, au choix avec :
+        · Metric-OSRM, serveur OSRM de l'Insee (metric-osrm-backend.lab.sspcloud.fr, OpenStreetMap, sans clé) :
+          service « table », une école vers 25 candidates par appel (par défaut) ;
+        · le service d'itinéraire de l'IGN (data.geopf.fr), un trajet par appel.
+      Il calcule :
+        · de chaque école vers les N écoles les plus proches PAR LA ROUTE (résultat exact, voir ci-dessous) ;
+        · de chaque école vers son collège de secteur.
+      Résultats ajoutés dans la table des distances (Depart, Arrivee, Km, Minutes, Statut, Calcule_le).
+      Seules les paires absentes de cette table sont demandées au service : relancer ne recalcule rien.
+
+      Méthode exacte : la distance routière n'est jamais inférieure à la distance à vol d'oiseau. Les écoles
+      candidates sont prises par distance à vol d'oiseau croissante ; on s'arrête dès que la N-ième meilleure
+      distance routière trouvée est inférieure ou égale à la distance à vol d'oiseau de la candidate suivante.
+      Une paire déjà calculée dans l'autre sens (B → A) est recopiée (Statut « retour ») sans appel.
+      Débit : 1 appel par seconde par défaut (limite de la passerelle IGN ; courtoisie pour Metric-OSRM) ; réglable.
+      IGN : moteur bdtopo-valhalla par défaut (bdtopo-osrm a été retiré : réponse 404).
+    -->
+    <style>
+      :root {
+        --bleu: #000091;
+        --muet: #666;
+        --bord: #ddd;
+        --fond: #f6f6f6;
+        --rouge: #ce0500;
+        --vert: #18753c;
+      }
+      body {
+        margin: 0;
+        font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: var(--fond);
+        color: #161616;
+      }
+      main {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 14px 16px 30px;
+      }
+      h1 {
+        font-size: 18px;
+        color: var(--bleu);
+        margin: 0 0 4px;
+      }
+      section,
+      details {
+        background: #fff;
+        border: 1px solid var(--bord);
+        border-left: 4px solid var(--bleu);
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin: 12px 0;
+      }
+      summary {
+        cursor: pointer;
+        font-weight: 600;
+        color: var(--bleu);
+      }
+      label {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 2px;
+        margin: 6px 14px 4px 0;
+        font-size: 12px;
+        color: var(--muet);
+      }
+      input,
+      select {
+        font: inherit;
+        padding: 3px 6px;
+      }
+      input[type="text"] {
+        width: 170px;
+      }
+      input[type="number"] {
+        width: 80px;
+      }
+      button {
+        font: inherit;
+        padding: 6px 14px;
+        border: 1px solid var(--bleu);
+        background: var(--bleu);
+        color: #fff;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button.sec {
+        background: #fff;
+        color: var(--bleu);
+      }
+      button[disabled] {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .muet {
+        color: var(--muet);
+        font-size: 12px;
+      }
+      .err {
+        color: var(--rouge);
+      }
+      .ok {
+        color: var(--vert);
+      }
+      progress {
+        width: 100%;
+        height: 14px;
+        margin: 8px 0 2px;
+      }
+      #stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 18px;
+        font-size: 13px;
+      }
+      #stats b {
+        font-variant-numeric: tabular-nums;
+      }
+      #log {
+        white-space: pre-wrap;
+        font: 12px/1.5 ui-monospace, Consolas, monospace;
+        background: #fafafa;
+        border: 1px solid var(--bord);
+        padding: 8px;
+        max-height: 260px;
+        overflow: auto;
+        margin-top: 8px;
+      }
+      #log:empty {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Distancier routier</h1>
+      <p class="muet">
+        Distances par la route (Metric-OSRM de l'Insee, ou service d'itinéraire de l'IGN) de chaque école vers ses écoles les plus proches et vers son collège
+        de secteur. Seules les paires manquantes sont calculées ; les résultats sont ajoutés à la table des distances.
+      </p>
+
+      <details id="params">
+        <summary>Paramètres</summary>
+        <div>
+          <label>Table des établissements <input type="text" data-opt="src" /></label>
+          <label>Latitude <input type="text" data-opt="lat" /></label>
+          <label>Longitude <input type="text" data-opt="lon" /></label>
+          <label>Type d'établissement <input type="text" data-opt="type" /></label>
+          <label>Valeur « école » <input type="text" data-opt="ecole" /></label>
+          <label title="Ne garder que les écoles dont cette colonne contient la valeur ci-contre (départs et arrivées). Vide : toutes les écoles.">Restreindre à : colonne <input type="text" data-opt="filtCol" /></label>
+          <label>… contenant <input type="text" data-opt="filtVal" /></label>
+          <label title="Référence vers la table des établissements, ou code UAI en texte">Collège de secteur <input type="text" data-opt="college" /></label>
+          <label title="Colonne du code UAI, utilisée si la colonne du collège contient un code plutôt qu'une référence">Code UAI <input type="text" data-opt="uai" /></label>
+        </div>
+        <div>
+          <label>Table des distances <input type="text" data-opt="dst" /></label>
+          <label>Écoles les plus proches <input type="number" min="1" max="20" data-opt="n" /></label>
+          <label
+            title="IGN seulement. Metric-OSRM calcule toujours l'itinéraire le plus rapide."
+            >Itinéraire (IGN)
+            <select data-opt="optim">
+              <option value="fastest">le plus rapide</option>
+              <option value="shortest">le plus court</option>
+            </select></label
+          >
+          <label
+            title="Metric-OSRM : serveur OSRM de l'Insee (OpenStreetMap), une école vers 25 candidates par appel, sans clé. IGN : Géoplateforme, un trajet par appel."
+            >Service
+            <select data-opt="engine">
+              <option value="metric">Metric-OSRM (Insee)</option>
+              <option value="ign">IGN (Géoplateforme)</option>
+            </select></label
+          >
+          <label
+            title="Metric-OSRM : les trajets par bateau (OpenStreetMap : liaisons maritimes) sont exclus. Une école d'île n'est alors reliée qu'aux écoles de la même île ; une île sans autre école est ignorée."
+            ><span>Sans bateaux</span> <input type="checkbox" data-opt="noFerry"
+          /></label>
+          <label title="Garde-fou : nombre maximal d'écoles candidates essayées pour une école">Candidates au plus <input type="number" min="5" max="200" data-opt="maxc" /></label>
+          <label
+            title="Moteur de calcul de l'IGN (liste : data.geopf.fr/navigation/getcapabilities). Sans effet avec Metric-OSRM."
+            >Moteur IGN
+            <select data-opt="resource">
+              <option value="bdtopo-valhalla">bdtopo-valhalla (rapide)</option>
+              <option value="bdtopo-pgr">bdtopo-pgr (plus lent)</option>
+            </select></label
+          >
+          <label title="IGN : 1 appel par seconde au plus (limite de sa passerelle). Metric-OSRM : 1 par seconde par courtoisie (serveur expérimental partagé).">Appels par seconde <input type="number" min="0.2" max="5" step="0.1" data-opt="rate" /></label>
+        </div>
+        <p class="muet">Les noms de colonnes ignorent la casse. Les paramètres sont enregistrés avec la vue (accès complet requis).</p>
+      </details>
+
+      <section>
+        <div id="info" class="muet">Chargement…</div>
+        <p>
+          <label>Écoles à traiter <input type="number" id="limit" min="0" value="0" title="0 : toutes. Un petit nombre permet de faire un essai." /></label>
+          <button id="go" disabled>Calculer les distances manquantes</button>
+          <button id="stop" class="sec" disabled>Arrêter</button>
+          <button id="test" class="sec" title="Un appel au service choisi entre la première école et ses voisines, avec la réponse brute. Pour l'IGN, essaie aussi les adresses et moteurs connus et retient celle qui répond.">Tester un appel</button>
+        </p>
+        <progress id="prog" value="0" max="1" hidden></progress>
+        <div id="stats"></div>
+        <div id="log"></div>
+      </section>
+    </main>
+
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <script>
+      "use strict";
+      // adresses possibles du calcul d'itinéraire (le « Tester » essaie chacune et garde celle qui répond)
+      const ENDPOINTS = [
+        "https://data.geopf.fr/navigation/itineraire",
+        "https://data.geopf.fr/navigation/route",
+        "https://data.geopf.fr/navigation/simple/1.0.0/route",
+      ];
+      const FLUSH = 25; // lignes écrites par lot
+      const DEFAULTS = {
+        src: "REF_ETAB",
+        lat: "latitude",
+        lon: "longitude",
+        type: "Type_etablissement",
+        ecole: "Ecole",
+        college: "UAI_College",
+        filtCol: "Statut_public_prive", // restriction facultative (vide : toutes les écoles)
+        filtVal: "Public",
+        uai: "UAI", // si la colonne du collège contient un code UAI (texte) plutôt qu'une référence
+        dst: "REF_DISTANCES",
+        n: 5,
+        optim: "fastest",
+        maxc: 40,
+        resource: "bdtopo-valhalla", // bdtopo-osrm retiré par l'IGN (404) en 2026
+        rate: 1, // appels par seconde (passerelle IGN : 1 par seconde annoncé)
+        endpoint: ENDPOINTS[0],
+        engine: "metric", // « metric » : serveur OSRM de l'Insee (Metric-OSRM) ; « ign » : Géoplateforme
+        osrm: "https://metric-osrm-backend.lab.sspcloud.fr",
+        noFerry: true, // Metric-OSRM : sans bacs ni bateaux (les îles ne sont reliées qu'entre écoles de la même île)
+      };
+      const BATCH = 25; // Metric-OSRM : destinations demandées en un seul appel (service « table »)
+      let opt = { ...DEFAULTS };
+      let running = false,
+        stopAsked = false;
+      const $ = (s) => document.querySelector(s);
+
+      // ---------- paramètres (options de la vue) ----------
+      function showOpts() {
+        for (const el of document.querySelectorAll("[data-opt]")) {
+          if (el.type === "checkbox") el.checked = opt[el.dataset.opt] !== false;
+          else el.value = opt[el.dataset.opt];
+        }
+      }
+      document.addEventListener("change", (ev) => {
+        const k = ev.target.dataset?.opt;
+        if (!k) return;
+        const v =
+          ev.target.type === "checkbox"
+            ? ev.target.checked
+            : ev.target.type === "number" ? Number(ev.target.value) || DEFAULTS[k] : k === "filtCol" ? ev.target.value.trim() : ev.target.value.trim() || DEFAULTS[k];
+        opt[k] = v;
+        grist.setOption(k, v).catch(() => {});
+        prepare();
+      });
+
+      // ---------- utilitaires ----------
+      const rows = (t) => (t.id || []).map((id, i) => Object.fromEntries(Object.keys(t).map((k) => [k, t[k][i]])));
+      // colKey — nom réel d'une colonne, sans tenir compte de la casse
+      function colKey(t, name) {
+        const k = Object.keys(t).find((c) => c.toLowerCase() === String(name).toLowerCase());
+        if (!k) throw new Error(`Colonne « ${name} » introuvable`);
+        return k;
+      }
+      const num = (v) => (v === null || v === undefined || v === "" ? NaN : Number(String(v).replace(",", ".")));
+      const hasVal = (v, x) => (Array.isArray(v) ? v.includes(x) : String(v ?? "").includes(x));
+      function crow(a, b) {
+        const R = Math.PI / 180,
+          dLat = (b.lat - a.lat) * R,
+          dLon = (b.lon - a.lon) * R;
+        const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * R) * Math.cos(b.lat * R) * Math.sin(dLon / 2) ** 2;
+        return 2 * 6371 * Math.asin(Math.sqrt(h));
+      }
+      const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const fmtDur = (s) => (s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`);
+      function log(msg, cls) {
+        const l = $("#log"),
+          d = document.createElement("div");
+        d.textContent = msg;
+        if (cls) d.className = cls;
+        l.append(d);
+        while (l.children.length > 300) l.firstChild.remove();
+        l.scrollTop = l.scrollHeight;
+      }
+
+      // ---------- lecture des données ----------
+      let D = null; // { ecoles, byId, known, cols }
+      async function load() {
+        const src = await grist.docApi.fetchTable(opt.src);
+        const kLat = colKey(src, opt.lat),
+          kLon = colKey(src, opt.lon),
+          kType = colKey(src, opt.type),
+          kCol = colKey(src, opt.college),
+          kFilt = String(opt.filtCol || "").trim() ? colKey(src, opt.filtCol) : null; // restriction (ex. publiques)
+        const etabs = rows(src).map((r) => ({
+          id: r.id,
+          lat: num(r[kLat]),
+          lon: num(r[kLon]),
+          ecole: hasVal(r[kType], opt.ecole) && (!kFilt || hasVal(r[kFilt], opt.filtVal)),
+          colRaw: r[kCol],
+        }));
+        const byId = new Map(etabs.map((e) => [e.id, e]));
+        // collège : référence (numéro de ligne) ou code UAI en texte
+        const kUai = Object.keys(src).find((c) => c.toLowerCase() === String(opt.uai).toLowerCase());
+        const byUai = kUai ? new Map(rows(src).map((r) => [String(r[kUai] || "").trim().toUpperCase(), r.id])) : new Map();
+        for (const e of etabs) {
+          let v = e.colRaw;
+          if (Array.isArray(v)) v = v[0] === "L" ? v[1] : v[0]; // liste de références
+          e.college = typeof v === "number" ? v : byUai.get(String(v || "").trim().toUpperCase()) || 0;
+          e.colSet = !!v;
+        }
+        const geo = (e) => e && Number.isFinite(e.lat) && Number.isFinite(e.lon);
+        const ecoles = etabs.filter((e) => e.ecole && geo(e));
+        const dst = await grist.docApi.fetchTable(opt.dst);
+        for (const c of ["Depart", "Arrivee", "Km", "Minutes", "Statut", "Calcule_le"]) colKey(dst, c);
+        const known = new Map(),
+          failIds = [];
+        for (const r of rows(dst)) {
+          // échecs : jamais conservés (une panne du service ne doit pas bloquer la paire) — ceux d'une version
+          // précédente sont supprimés au lancement
+          if (r.Km === null || r.Km === undefined || r.Km === "") failIds.push(r.id);
+          else known.set(`${r.Depart}>${r.Arrivee}`, { km: r.Km, min: r.Minutes ?? null, statut: r.Statut });
+        }
+        return { etabs, ecoles, byId, geo, known, failIds, sansGeo: etabs.filter((e) => e.ecole && !geo(e)).length };
+      }
+      async function prepare() {
+        if (running) return;
+        $("#go").disabled = true;
+        try {
+          D = await load();
+          const withCol = D.ecoles.filter((e) => D.geo(D.byId.get(e.college))).length,
+            colSet = D.ecoles.filter((e) => e.colSet).length,
+            colFound = D.ecoles.filter((e) => D.byId.has(e.college)).length;
+          const colNote =
+            withCol === colSet
+              ? ""
+              : ` <span class="err">— collège renseigné pour ${colSet} écoles, retrouvé pour ${colFound}, localisé (coordonnées) pour ${withCol}${
+                  colSet && !colFound ? ` : exemple de valeur lue « ${esc(String(D.ecoles.find((e) => e.colSet).colRaw))} »` : ""
+                }</span>`;
+          $("#info").innerHTML =
+            `<b>${D.ecoles.length}</b> écoles${String(opt.filtCol || "").trim() ? ` (${esc(opt.filtCol)} contenant « ${esc(opt.filtVal)} »)` : ""} localisées${D.sansGeo ? ` (${D.sansGeo} sans coordonnées, ignorées)` : ""}, ` +
+            `dont <b>${withCol}</b> avec un collège de secteur localisé · <b>${D.known.size}</b> distances déjà dans ${opt.dst}.${colNote}`;
+          $("#info").className = "muet";
+          $("#go").disabled = !D.ecoles.length;
+        } catch (e) {
+          $("#info").textContent = `Impossible de lire les tables : ${e.message || e}. Vérifiez les paramètres et l'accès complet du widget.`;
+          $("#info").className = "err";
+          $("#params").open = true;
+        }
+      }
+
+      // ---------- appel IGN (débit limité, nouvelles tentatives) ----------
+      let lastCall = 0,
+        calls = 0;
+      // ignUrl — virgules des coordonnées laissées telles quelles (URLSearchParams les encoderait en %2C)
+      const ignUrl = (a, b, base = opt.endpoint) =>
+        `${base}?resource=${encodeURIComponent(opt.resource)}&profile=car&optimization=${encodeURIComponent(opt.optim)}` +
+        `&start=${a.lon},${a.lat}&end=${b.lon},${b.lat}` +
+        `&distanceUnit=kilometer&timeUnit=minute&getSteps=false&getBbox=false&geometryFormat=polyline`; // tracé compact : seul le total sert
+      async function throttle() {
+        const wait = lastCall + 1000 / Math.max(0.2, Number(opt.rate) || 1) + 50 - Date.now();
+        if (wait > 0) await sleep(wait);
+        lastCall = Date.now();
+        calls++;
+      }
+      async function ign(a, b) {
+        const url = ignUrl(a, b);
+        for (let essai = 0; essai < 4; essai++) {
+          await throttle();
+          let res;
+          try {
+            res = await fetch(url);
+          } catch (e) {
+            await sleep(1500 * (essai + 1)); // réseau : on réessaie
+            continue;
+          }
+          if (res.status === 429 || res.status >= 500) {
+            await sleep(2000 * (essai + 1));
+            continue;
+          }
+          const txt = await res.text();
+          const why = (m) => ({ km: null, min: null, statut: "sans itinéraire", why: `${m} — ${txt.replace(/\s+/g, " ").slice(0, 300)}` });
+          if (!res.ok) return why(`HTTP ${res.status}`);
+          let j;
+          try {
+            j = JSON.parse(txt);
+          } catch {
+            return why("réponse illisible");
+          }
+          const km = Number(j.distance),
+            min = Number(j.duration);
+          if (!Number.isFinite(km)) return why("réponse sans distance");
+          return { km: Math.round(km * 100) / 100, min: Number.isFinite(min) ? Math.round(min) : null, statut: "ok" };
+        }
+        throw new Error("le service d'itinéraire ne répond pas (plusieurs essais)");
+      }
+
+      // ---------- Metric-OSRM (Insee) : service « table » d'OSRM, une source vers plusieurs destinations ----------
+      const osrmUrl = (a, list) =>
+        `${String(opt.osrm).replace(/\/+$/, "")}/table/v1/driving/${[a, ...list].map((p) => `${p.lon},${p.lat}`).join(";")}` +
+        `?sources=0&annotations=distance,duration${opt.noFerry ? "&exclude=ferry" : ""}`;
+      async function metricTable(a, list) {
+        const url = osrmUrl(a, list);
+        for (let essai = 0; essai < 4; essai++) {
+          await throttle();
+          let res;
+          try {
+            res = await fetch(url);
+          } catch (e) {
+            await sleep(1500 * (essai + 1));
+            continue;
+          }
+          if (res.status === 429 || res.status >= 500) {
+            await sleep(2000 * (essai + 1));
+            continue;
+          }
+          const txt = await res.text();
+          const fail = (m) => list.map(() => ({ km: null, min: null, statut: "sans itinéraire", why: `${m} — ${txt.replace(/\s+/g, " ").slice(0, 300)}` }));
+          let j;
+          try {
+            j = JSON.parse(txt);
+          } catch {
+            return fail(`HTTP ${res.status}, réponse illisible`);
+          }
+          if (j.code === "InvalidValue" && opt.noFerry && /exclude/i.test(j.message || ""))
+            throw new Error("le serveur ne sait pas exclure les bateaux : décochez « Sans bateaux » dans les paramètres");
+          if (!res.ok || j.code !== "Ok") return fail(`HTTP ${res.status} ${j.code || ""}`);
+          return list.map((_, i) => {
+            const m = j.distances?.[0]?.[i + 1],
+              s = j.durations?.[0]?.[i + 1];
+            if (m === null || m === undefined || !Number.isFinite(Number(m)))
+              return { km: null, min: null, statut: "sans itinéraire", why: "pas d'itinéraire (réponse null)" };
+            return { km: Math.round(Number(m) / 10) / 100, min: Number.isFinite(Number(s)) ? Math.round(Number(s) / 60) : null, statut: "ok" };
+          });
+        }
+        throw new Error("le serveur Metric-OSRM ne répond pas (plusieurs essais)");
+      }
+      // fetchOne — un trajet, par le service choisi
+      const fetchOne = async (a, b) => (opt.engine === "ign" ? ign(a, b) : (await metricTable(a, [b]))[0]);
+
+      // ---------- écriture par lots ----------
+      let pending = [];
+      const today = () => {
+        const d = new Date();
+        return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 1000; // colonne Date de Grist : secondes UTC
+      };
+      async function flush() {
+        if (!pending.length) return;
+        const batch = pending;
+        pending = [];
+        await grist.docApi.applyUserActions([
+          [
+            "BulkAddRecord",
+            opt.dst,
+            batch.map(() => null),
+            {
+              Depart: batch.map((x) => x.a),
+              Arrivee: batch.map((x) => x.b),
+              Km: batch.map((x) => x.km),
+              Minutes: batch.map((x) => x.min),
+              Statut: batch.map((x) => x.statut),
+              Calcule_le: batch.map(() => today()),
+            },
+          ],
+        ]);
+        S.written += batch.length;
+      }
+
+      // route — distance a → b : déjà connue, recopiée du sens inverse, ou demandée à l'IGN
+      async function route(a, b) {
+        const k = `${a.id}>${b.id}`;
+        if (D.known.has(k)) return D.known.get(k);
+        let r;
+        const rev = D.known.get(`${b.id}>${a.id}`);
+        if (rev && rev.km !== null && rev.statut !== "retour") {
+          r = { km: rev.km, min: rev.min, statut: "retour" };
+          S.copied++;
+        } else if (rev && rev.km === null) {
+          r = rev; // échec dans l'autre sens pendant ce calcul : pas de nouvel appel
+        } else return store(a, b, await fetchOne(a, b));
+        D.known.set(k, r);
+        if (r.km === null) return r;
+        pending.push({ a: a.id, b: b.id, km: r.km, min: r.min, statut: r.statut });
+        if (pending.length >= FLUSH) await flush();
+        return r;
+      }
+      // store — enregistre un résultat obtenu du service
+      async function store(a, b, r) {
+        if (r.km === null) {
+          S.fail++;
+          S.lastWhy = r.why;
+          if (S.fail <= 3) log(`Échec #${a.id} → #${b.id} : ${r.why}`, "err");
+        } else S.fetched++;
+        D.known.set(`${a.id}>${b.id}`, r);
+        if (r.km === null) return r; // échec : gardé en mémoire pour ce calcul, jamais écrit dans la table
+        pending.push({ a: a.id, b: b.id, km: r.km, min: r.min, statut: r.statut });
+        if (pending.length >= FLUSH) await flush();
+        return r;
+      }
+      // needsCall — paire ni connue, ni recopiable depuis le sens inverse
+      const needsCall = (a, b) => !D.known.has(`${a.id}>${b.id}`) && !D.known.has(`${b.id}>${a.id}`);
+      // prefetch — Metric-OSRM : demande en un appel les prochaines candidates encore inconnues (au plus BATCH)
+      async function prefetch(e, cands, from, room) {
+        const list = [];
+        for (let j = from; j < cands.length && j - from < room && list.length < BATCH; j++) if (needsCall(e, cands[j].o)) list.push(cands[j].o);
+        if (!list.length) return;
+        const rs = await metricTable(e, list);
+        for (let j = 0; j < list.length; j++) await store(e, list[j], rs[j]);
+      }
+
+      // ---------- calcul ----------
+      const S = { done: 0, fetched: 0, copied: 0, fail: 0, written: 0, t0: 0, total: 0 };
+      function stats() {
+        const el = (Date.now() - S.t0) / 1000,
+          left = S.done ? (el / S.done) * (S.total - S.done) : 0;
+        $("#prog").max = S.total;
+        $("#prog").value = S.done;
+        $("#stats").innerHTML =
+          `<span>Écoles : <b>${S.done}</b> / ${S.total}</span><span>Appels ${opt.engine === "ign" ? "IGN" : "Metric-OSRM"} : <b>${calls}</b></span>` +
+          `<span>Recopiées (sens inverse) : <b>${S.copied}</b></span><span>Sans itinéraire : <b>${S.fail}</b></span>` +
+          `<span>Lignes ajoutées : <b>${S.written}</b></span>` +
+          (running && S.done ? `<span>Reste environ <b>${fmtDur(left)}</b></span>` : "");
+      }
+      async function run() {
+        running = true;
+        stopAsked = false;
+        $("#go").disabled = true;
+        $("#stop").disabled = false;
+        $("#prog").hidden = false;
+        $("#log").replaceChildren();
+        Object.assign(S, { done: 0, fetched: 0, copied: 0, fail: 0, written: 0, t0: Date.now(), lastWhy: "" });
+        calls = 0;
+        try {
+          D = await load();
+          const N = Math.max(1, Number(opt.n) || 5),
+            MAXC = Math.max(N, Number(opt.maxc) || 40);
+          const limit = Number($("#limit").value) || 0;
+          const todo = limit ? D.ecoles.slice(0, limit) : D.ecoles;
+          if (D.failIds.length) {
+            await grist.docApi.applyUserActions([["BulkRemoveRecord", opt.dst, D.failIds]]);
+            log(`${D.failIds.length} lignes « sans itinéraire » d'un calcul précédent supprimées : elles seront recalculées.`);
+          }
+          S.total = todo.length;
+          stats();
+          for (const e of todo) {
+            if (stopAsked) break;
+            // candidates par distance à vol d'oiseau croissante
+            const cands = D.ecoles
+              .filter((o) => o.id !== e.id)
+              .map((o) => ({ o, d: crow(e, o) }))
+              .sort((x, y) => x.d - y.d);
+            const found = [];
+            let tried = 0,
+              fails = 0;
+            for (let i = 0; i < cands.length; i++) {
+              const c = cands[i];
+              if (stopAsked) break;
+              // arrêt exact : la N-ième meilleure distance routière ne peut plus être battue
+              if (found.length >= N && found[N - 1] <= c.d) break;
+              if (tried >= MAXC) {
+                log(
+                  found.length < N
+                    ? `École #${e.id} : seulement ${found.length} école(s) reliée(s) par la route parmi ${MAXC} candidates (île ?).`
+                    : `École #${e.id} : arrêt après ${MAXC} candidates (garde-fou) — résultat peut-être incomplet.`,
+                  "err",
+                );
+                break;
+              }
+              if (opt.engine !== "ign" && needsCall(e, c.o)) await prefetch(e, cands, i, MAXC - tried);
+              const r = await route(e, c.o);
+              if (r.km === null && !S.fetched && S.fail >= 9) break; // tout échoue : l'arrêt général suit
+              tried++;
+              if (r.km === null) fails++;
+              else {
+                found.push(r.km);
+                found.sort((x, y) => x - y);
+              }
+              // IGN (un appel par trajet) : on n'insiste pas après 3 échecs ; Metric-OSRM : le lot est déjà calculé
+              if (opt.engine === "ign" && !found.length && fails >= 3 && S.fetched) {
+                log(`École #${e.id} : aucun itinéraire par la route vers les 3 écoles les plus proches (île sans autre école ?) — ignorée.`, "err");
+                break;
+              }
+            }
+            // collège de secteur
+            const col = D.byId.get(e.college);
+            if (!stopAsked && D.geo(col)) await route(e, col);
+            S.done++;
+            stats();
+            // le service refuse tout : inutile de continuer
+            if (S.done >= 3 && !S.fetched && !S.copied && S.fail) throw new Error(`aucun itinéraire obtenu pour les ${S.done} premières écoles. Dernière réponse du service : ${S.lastWhy}`);
+          }
+          await flush();
+          log(
+            stopAsked ? `Arrêté. ${S.written} lignes ajoutées ; relancez pour continuer.` : `Terminé : ${S.written} lignes ajoutées.`,
+            stopAsked ? "" : "ok",
+          );
+        } catch (e) {
+          try {
+            await flush();
+          } catch {}
+          log(`Erreur : ${e.message || e}. Les distances déjà calculées sont enregistrées ; relancez pour reprendre.`, "err");
+        }
+        running = false;
+        $("#stop").disabled = true;
+        stats();
+        prepare();
+      }
+      $("#go").addEventListener("click", run);
+      // Tester — essaie chaque adresse et chaque moteur sur un trajet de quelques km, journalise les réponses
+      //   brutes et retient la première combinaison qui renvoie une distance
+      $("#test").addEventListener("click", async () => {
+        if (running) return;
+        $("#test").disabled = true;
+        try {
+          D = await load();
+          const a = D.ecoles[0];
+          if (!a) return log("Aucune école localisée.", "err");
+          const near = D.ecoles.filter((o) => o.id !== a.id && crow(a, o) > 1).sort((x, y) => crow(a, x) - crow(a, y));
+          const b = near[0] || D.ecoles.find((o) => o.id !== a.id);
+          if (opt.engine !== "ign") {
+            const list = near.slice(0, 3);
+            log(`Test Metric-OSRM : école #${a.id} (lat ${a.lat}, lon ${a.lon}) → écoles ${list.map((o) => `#${o.id} (${crow(a, o).toFixed(2)} km à vol d'oiseau)`).join(", ")}`);
+            log(osrmUrl(a, list));
+            let res, txt;
+            try {
+              res = await fetch(osrmUrl(a, list));
+              txt = await res.text();
+            } catch (e) {
+              return log(`Échec réseau : ${e.message || e} (serveur arrêté, ou appel refusé par le navigateur)`, "err");
+            }
+            log(`HTTP ${res.status} : ${txt.replace(/\s+/g, " ").slice(0, 400)}`, res.ok ? "" : "err");
+            const rs = await metricTable(a, list);
+            return log(rs.map((r, i) => `#${list[i].id} : ${r.km === null ? "sans itinéraire" : `${r.km} km, ${r.min} min`}`).join(" · "), rs.some((r) => r.km !== null) ? "ok" : "err");
+          }
+          log(`Test : école #${a.id} (lat ${a.lat}, lon ${a.lon}) → école #${b.id} (lat ${b.lat}, lon ${b.lon}), ${crow(a, b).toFixed(2)} km à vol d'oiseau`);
+          const engines = [opt.resource, ...["bdtopo-valhalla", "bdtopo-pgr"].filter((r) => r !== opt.resource)];
+          const bases = [opt.endpoint, ...ENDPOINTS.filter((u) => u !== opt.endpoint)];
+          for (const base of bases)
+            for (const resource of engines) {
+              const url = ignUrl(a, b, base).replace(/resource=[^&]*/, `resource=${resource}`);
+              await sleep(1100);
+              let res, txt;
+              try {
+                res = await fetch(url);
+                txt = await res.text();
+              } catch (e) {
+                log(`${url}\n  → échec réseau : ${e.message || e}`, "err");
+                continue;
+              }
+              let km = NaN;
+              try {
+                km = Number(JSON.parse(txt).distance);
+              } catch {}
+              log(`${url}\n  → HTTP ${res.status} : ${txt.replace(/\s+/g, " ").slice(0, 300)}`, Number.isFinite(km) ? "ok" : "err");
+              if (Number.isFinite(km)) {
+                Object.assign(opt, { endpoint: base, resource });
+                grist.setOption("endpoint", base).catch(() => {});
+                grist.setOption("resource", resource).catch(() => {});
+                showOpts();
+                return log(`✔ Adresse et moteur retenus : ${base} · ${resource} (${km} km). Vous pouvez lancer le calcul.`, "ok");
+              }
+            }
+          log("Aucune combinaison ne répond : envoyez ce journal.", "err");
+        } catch (e) {
+          log(`Test impossible : ${e.message || e}`, "err");
+        } finally {
+          $("#test").disabled = false;
+        }
+      });
+      $("#stop").addEventListener("click", () => {
+        stopAsked = true;
+        $("#stop").disabled = true;
+        log("Arrêt demandé…");
+      });
+      window.addEventListener("beforeunload", (ev) => {
+        if (running) ev.preventDefault();
+      });
+
+      // ---------- démarrage ----------
+      grist.ready({ requiredAccess: "full" });
+      let optsSeen = false;
+      grist.onOptions((o) => {
+        optsSeen = true;
+        opt = { ...DEFAULTS, ...(o || {}) };
+        showOpts();
+        prepare();
+      });
+      setTimeout(() => {
+        if (!optsSeen) {
+          showOpts();
+          prepare();
+        }
+      }, 1500); // vue sans options enregistrées : valeurs par défaut
+    </script>
+  </body>
+</html>
