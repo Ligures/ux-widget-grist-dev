@@ -33,7 +33,7 @@ Les versions antérieures à 0.5.0 ont été développées avant la mise en dép
 
 ### Administrateurs
 - *Nouveau* — Configuration, **4. Affichage → Actualisation automatique** : toutes les 10 s à 2 minutes (20 s par défaut) ou désactivée ; commun à toutes les pages.
-- *Sécurité* — `index.html` : `connect-src` autorise les instances Grist `grist.numerique.gouv.fr` et `*.getgrist.com` (lecture de l'état du document). Une autre instance doit y être ajoutée, sinon l'actualisation automatique reste inactive (message dans la console).
+- *Sécurité* — `index.html` : `connect-src` autorise les instances Grist `grist.numerique.gouv.fr`, `grist.toutatice.fr`, `grist.ac-rennes.fr` et `*.getgrist.com` (lecture de l'état du document). Une autre instance doit y être ajoutée, sinon l'actualisation automatique reste inactive (message dans la console).
 
 ### Développeurs
 - *Nouveau* — `liveStart` / `liveCheck` / `docState` : `GET <baseUrl>/states?auth=<jeton>` (jeton de `getAccessToken({ readOnly: true })`, renouvelé avant expiration), comparaison du dernier état (`n:h`), `refreshAll(true)` silencieux si changement ; pas de vérification si l'onglet est caché, pendant `S.editing` ou avec la configuration ouverte ; vérification au retour sur l'onglet (`visibilitychange`) ; arrêt après 3 échecs consécutifs.
